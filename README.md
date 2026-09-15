@@ -111,3 +111,7 @@ version `gin/go.mod` requires both match the tag, runs the tests, pushes this
 directory to that repository as one commit and tags it there as `v0.2.0` and
 `gin/v0.2.0`: the gin middleware is a nested module with its own tag.
 `gin/go.mod`'s `replace` line only applies inside this repository.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).
