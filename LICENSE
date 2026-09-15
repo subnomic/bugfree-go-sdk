@@ -1,0 +1,18 @@
+Copyright (c) 2026 Subnomic. All rights reserved.
+
+This software, including its source code, documentation and build artifacts, is
+the proprietary property of Subnomic. No part of it may be copied, modified,
+merged, published, distributed, sublicensed, sold, or used to provide a service
+to third parties without prior written permission from Subnomic.
+
+The bugfree SDKs, published as the Go module github.com/subnomic/bugfree-go-sdk
+and the npm package @subnomic/bugfree-js, may be installed and used without
+modification to send error reports to a bugfree server. This permission does not
+extend to the server, the interface, or any other part of this repository.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL SUBNOMIC BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
