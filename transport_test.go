@@ -143,6 +143,10 @@ func TestHTTPTransportDropsWhenQueueIsFull(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Errorf("Send took %v; the queue is blocking", elapsed)
 	}
+	// What was dropped is counted, so Client.Stats can report it.
+	if transport.droppedFull.Load() == 0 {
+		t.Error("the dropped events were not counted")
+	}
 }
 
 // Flush has to watch the in-flight event, not only the queue.
@@ -205,4 +209,56 @@ func TestHTTPTransportCloseIsIdempotent(t *testing.T) {
 	transport.Close()
 	// After closing, sending is silently ignored.
 	transport.Send(&Event{Level: LevelError, Type: "X", Message: "m"})
+}
+
+// A 429 pauses sending for as long as the server asked; nothing is retried or
+// sent in the meantime.
+func TestHTTPTransportPausesOnRateLimit(t *testing.T) {
+	var calls int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	transport := newHTTPTransport(server.URL, nil, false)
+	defer transport.Close()
+
+	transport.Send(&Event{Level: LevelError, Type: "X", Message: "first"})
+	transport.Flush(2 * time.Second)
+
+	for range 5 {
+		transport.Send(&Event{Level: LevelError, Type: "X", Message: "during the pause"})
+	}
+	transport.Flush(2 * time.Second)
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("request count = %d, expected 1 (no sending while paused)", got)
+	}
+	if remaining := time.Until(time.Unix(0, transport.pausedUntil.Load())); remaining < 25*time.Second {
+		t.Errorf("pause = %s, expected about the 30s the server asked for", remaining)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		value string
+		want  time.Duration
+	}{
+		{"120", 2 * time.Minute},
+		{now.Add(90 * time.Second).Format(http.TimeFormat), 90 * time.Second},
+		{"", defaultRetryAfter},
+		{"-5", defaultRetryAfter},
+		{"soon", defaultRetryAfter},
+		{now.Add(-time.Hour).Format(http.TimeFormat), defaultRetryAfter},
+	}
+	for _, tc := range cases {
+		if got := parseRetryAfter(tc.value, now); got != tc.want {
+			t.Errorf("parseRetryAfter(%q) = %s, expected %s", tc.value, got, tc.want)
+		}
+	}
 }

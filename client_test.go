@@ -343,3 +343,35 @@ func TestPackageOfExtractsPackagePath(t *testing.T) {
 		}
 	}
 }
+
+// panicSite plays the handler whose panic a middleware raises again.
+func panicSite() {
+	panic("from the handler")
+}
+
+// A recovery layer that recovers and raises the panic again must not become the
+// reported panic site.
+func TestCaptureRecoveredSkipsARaisedAgainPanic(t *testing.T) {
+	client, transport := newTestClient(t, nil)
+
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				client.CaptureRecovered(recovered, 1)
+			}
+		}()
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					panic(recovered)
+				}
+			}()
+			panicSite()
+		}()
+	}()
+
+	event := transport.last()
+	if event == nil || len(event.Stacktrace) == 0 || !strings.HasSuffix(event.Stacktrace[0].Function, ".panicSite") {
+		t.Fatalf("stack starts at %+v, expected panicSite", event.Stacktrace)
+	}
+}

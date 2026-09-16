@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,16 @@ type httpTransport struct {
 	// Flush has to watch the in-flight ones as well as the queue; otherwise the
 	// last event is lost during shutdown.
 	pending atomic.Int64
+
+	// pausedUntil (unix nanoseconds) is when the server said it takes events
+	// again. Until then events are dropped without a request: a server that is
+	// rate limiting must not be flooded, and the application must not wait on it.
+	pausedUntil atomic.Int64
+
+	// droppedFull and droppedPaused count the events dropped because the queue was
+	// full or the server had asked to wait; Client.Stats reports them.
+	droppedFull   atomic.Uint64
+	droppedPaused atomic.Uint64
 
 	// closeMu separates closing from sending. A lock-free "closed" check races,
 	// and writing to a closed channel panics.
@@ -87,11 +98,17 @@ func (t *httpTransport) Send(event *Event) {
 	if t.closed {
 		return
 	}
+	if t.paused() {
+		t.droppedPaused.Add(1)
+		t.logf("bugfree: server asked to wait, event dropped (%s)", event.Type)
+		return
+	}
 
 	select {
 	case t.queue <- event:
 		t.pending.Add(1)
 	default:
+		t.droppedFull.Add(1)
 		t.logf("bugfree: queue is full, event dropped (%s)", event.Type)
 	}
 }
@@ -101,7 +118,11 @@ func (t *httpTransport) worker() {
 	defer t.wg.Done()
 	for event := range t.queue {
 		// After Close gave up, the remaining events are drained without sending.
-		if t.ctx.Err() == nil {
+		switch {
+		case t.ctx.Err() != nil:
+		case t.paused():
+			t.droppedPaused.Add(1)
+		default:
 			t.post(event)
 		}
 		t.pending.Add(-1)
@@ -117,9 +138,15 @@ func (t *httpTransport) post(event *Event) {
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
-		status, response, err := t.do(body)
+		status, retryAfter, response, err := t.do(body)
 		if err == nil && status < 300 {
 			t.logf("bugfree: event stored (%s)", response.ShortID)
+			return
+		}
+
+		if status == http.StatusTooManyRequests {
+			t.pause(retryAfter)
+			t.logf("bugfree: server is rate limiting, sending paused for %s", retryAfter)
 			return
 		}
 
@@ -140,8 +167,8 @@ func (t *httpTransport) post(event *Event) {
 	}
 }
 
-// do makes a single HTTP request.
-func (t *httpTransport) do(body []byte) (int, ingestResponse, error) {
+// do makes a single HTTP request. retryAfter is the wait a 429 answer asked for.
+func (t *httpTransport) do(body []byte) (int, time.Duration, ingestResponse, error) {
 	timeout := t.client.Timeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -151,25 +178,50 @@ func (t *httpTransport) do(body []byte) (int, ingestResponse, error) {
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
-		return 0, ingestResponse{}, err
+		return 0, 0, ingestResponse{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "bugfree-go/"+Version)
 
 	response, err := t.client.Do(request)
 	if err != nil {
-		return 0, ingestResponse{}, err
+		return 0, 0, ingestResponse{}, err
 	}
 	defer response.Body.Close()
 
 	payload, _ := io.ReadAll(io.LimitReader(response.Body, 8*1024))
 	if response.StatusCode >= 300 {
-		return response.StatusCode, ingestResponse{}, fmt.Errorf("unexpected status: %s", string(payload))
+		retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now())
+		return response.StatusCode, retryAfter, ingestResponse{}, fmt.Errorf("unexpected status: %s", string(payload))
 	}
 
 	var decoded ingestResponse
 	_ = json.Unmarshal(payload, &decoded)
-	return response.StatusCode, decoded, nil
+	return response.StatusCode, 0, decoded, nil
+}
+
+// defaultRetryAfter is the pause after a 429 that names no wait of its own.
+const defaultRetryAfter = time.Minute
+
+// parseRetryAfter reads a Retry-After header: a number of seconds or an HTTP date.
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil && at.After(now) {
+		return at.Sub(now)
+	}
+	return defaultRetryAfter
+}
+
+// pause stops sending for the given duration.
+func (t *httpTransport) pause(wait time.Duration) {
+	t.pausedUntil.Store(time.Now().Add(wait).UnixNano())
+}
+
+// paused reports whether the server's requested wait is still running.
+func (t *httpTransport) paused() bool {
+	return time.Now().UnixNano() < t.pausedUntil.Load()
 }
 
 // Flush waits for the pending and in-flight events to finish.

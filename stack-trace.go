@@ -78,13 +78,14 @@ func framesFrom(callers []uintptr) []Frame {
 //
 //	runtime.gopanic -> the real panic site -> ...
 //
-// When gopanic is found, everything before it (the SDK and recovery frames) is dropped.
+// Everything before the last gopanic (the SDK and recovery frames) is dropped. A
+// middleware that recovers and raises the panic again leaves a gopanic of its
+// own above the original one; the last one is where the panic really started.
 func trimRuntimeFrames(frames []Frame) []Frame {
 	start := 0
 	for i, frame := range frames {
 		if frame.Function == "runtime.gopanic" || frame.Function == "panic" {
 			start = i + 1
-			break
 		}
 	}
 

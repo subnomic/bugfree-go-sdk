@@ -73,6 +73,9 @@ type User struct {
 // Event is the body sent to the ingest endpoint.
 // The field names match the bugfree ingest API one to one.
 type Event struct {
+	// EventID is chosen by the SDK; the capture calls return it.
+	EventID string `json:"event_id,omitempty"`
+
 	Level    Level  `json:"level"`
 	Type     string `json:"type"`
 	Message  string `json:"message"`

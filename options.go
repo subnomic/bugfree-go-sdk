@@ -22,8 +22,14 @@ type Options struct {
 	Release     string
 	ServerName  string
 
-	// SampleRate is between 0 and 1; zero or negative counts as 1.
+	// SampleRate is between 0 and 1. Zero or negative counts as 1, so the zero
+	// Options send everything: to send nothing, leave DSN empty.
 	SampleRate float64
+
+	// DedupeWindow holds back an error identical (type, location and message) to
+	// one sent less than this long ago; the next one sent reports how many were
+	// held back. 0 uses the default (1s); a negative value sends every copy.
+	DedupeWindow time.Duration
 
 	// SourceContextLines is how many lines to show above and below the failing
 	// line in each frame. 0 uses the default (5); a negative value reads no source
@@ -46,6 +52,24 @@ type Options struct {
 	// from the DSN, so only frames outside stdlib and the module cache count as
 	// application code.
 	InAppPrefixes []string
+
+	// ProfilingInterval turns continuous profiling on: every interval a CPU profile
+	// of ProfileDuration and a heap profile are taken and sent. 0 leaves it off.
+	// A CPU profile costs a few percent of CPU while it runs.
+	ProfilingInterval time.Duration
+
+	// ProfileDuration is how long each CPU profile runs (10s by default).
+	ProfileDuration time.Duration
+
+	// TracesSampleRate is the share of new traces recorded, between 0 and 1; 0
+	// turns tracing off. A trace continued from an incoming traceparent header
+	// follows the caller's decision instead.
+	TracesSampleRate float64
+
+	// TrackSessions counts every request the middlewares handle as a session, for
+	// release health: the crash-free rate of each release. Counts are reported once
+	// a minute, not per request.
+	TrackSessions bool
 
 	// MaxBreadcrumbs is how many steps to keep (30 by default).
 	MaxBreadcrumbs int
@@ -76,7 +100,8 @@ type Options struct {
 type dsn struct {
 	publicKey string
 	storeURL  string
-	batchURL  string
+	// base is the ingest address with the key: http://host/ingest/v1/<key>
+	base string
 }
 
 // parseDSN parses the "http://key@host:3000/ingest" form.
@@ -114,7 +139,7 @@ func parseDSN(raw string) (*dsn, error) {
 	return &dsn{
 		publicKey: key,
 		storeURL:  fmt.Sprintf("%s/%s/v1/%s/store", base, path, key),
-		batchURL:  fmt.Sprintf("%s/%s/v1/%s/batch", base, path, key),
+		base:      fmt.Sprintf("%s/%s/v1/%s", base, path, key),
 	}, nil
 }
 
