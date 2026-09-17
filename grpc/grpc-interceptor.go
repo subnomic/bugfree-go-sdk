@@ -13,6 +13,8 @@ package bugfreegrpc
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log"
 	"strings"
 
@@ -61,7 +63,7 @@ func UnaryServerInterceptor(options Options) grpc.UnaryServerInterceptor {
 		defer func() {
 			recovered := recover()
 			if recovered == nil {
-				finishTransaction(transaction, err)
+				finishTransaction(ctx, transaction, err)
 				return
 			}
 			transaction.SetStatus("internal_error")
@@ -76,7 +78,7 @@ func UnaryServerInterceptor(options Options) grpc.UnaryServerInterceptor {
 		}()
 
 		response, err = handler(ctx, request)
-		recordSession(err)
+		recordSession(ctx, err)
 		if options.CaptureErrors {
 			captureError(ctx, info.FullMethod, err, options)
 		}
@@ -96,7 +98,7 @@ func StreamServerInterceptor(options Options) grpc.StreamServerInterceptor {
 		defer func() {
 			recovered := recover()
 			if recovered == nil {
-				finishTransaction(transaction, err)
+				finishTransaction(ctx, transaction, err)
 				return
 			}
 			transaction.SetStatus("internal_error")
@@ -111,7 +113,7 @@ func StreamServerInterceptor(options Options) grpc.StreamServerInterceptor {
 		}()
 
 		err = handler(server, wrapped)
-		recordSession(err)
+		recordSession(ctx, err)
 		if options.CaptureErrors {
 			captureError(ctx, info.FullMethod, err, options)
 		}
@@ -120,9 +122,9 @@ func StreamServerInterceptor(options Options) grpc.StreamServerInterceptor {
 }
 
 // recordSession counts a finished call for release health: a server-fault code
-// counts as errored.
-func recordSession(err error) {
-	if containsCode(defaultErrorCodes, status.Code(err)) {
+// counts as errored, a call the client left does not.
+func recordSession(ctx context.Context, err error) {
+	if !abandoned(ctx, err) && containsCode(defaultErrorCodes, status.Code(err)) {
 		bugfree.Current().RecordSession(bugfree.SessionErrored)
 		return
 	}
@@ -139,7 +141,9 @@ func (s *scopedStream) Context() context.Context { return s.ctx }
 
 // captureError records a returned error whose code means a server fault.
 func captureError(ctx context.Context, method string, err error, options Options) {
-	if err == nil {
+	// gRPC calls every error without a status Unknown, a dropped connection among
+	// them; recorded, each client that goes away would be an event.
+	if err == nil || abandoned(ctx, err) {
 		return
 	}
 	code := status.Code(err)
@@ -182,9 +186,29 @@ func modifiers(ctx context.Context, method string, options Options) []bugfree.Ev
 	return eventModifiers
 }
 
+// abandoned reports whether a call ended because its client went away or gave up,
+// rather than because the server failed: its context is over, or the error is
+// an end of stream, a cancellation or a deadline.
+func abandoned(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Canceled, codes.DeadlineExceeded:
+		return true
+	}
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // finishTransaction ends a call's transaction with the status its error names.
-func finishTransaction(transaction *bugfree.Span, err error) {
-	if code := status.Code(err); code != codes.OK {
+func finishTransaction(ctx context.Context, transaction *bugfree.Span, err error) {
+	if abandoned(ctx, err) {
+		transaction.SetStatus("cancelled")
+	} else if code := status.Code(err); code != codes.OK {
 		transaction.SetStatus(strings.ToLower(code.String()))
 	}
 	transaction.Finish()

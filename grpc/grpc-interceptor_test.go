@@ -3,6 +3,7 @@ package bugfreegrpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -106,6 +107,40 @@ func TestUnaryInterceptorCapturesServerFaultsOnly(t *testing.T) {
 	}
 	if events[0].Culprit != "/orders.v1.Orders/Pay" || len(events[0].Stacktrace) != 0 {
 		t.Errorf("culprit = %q with %d frames, expected the method and no interceptor stack", events[0].Culprit, len(events[0].Stacktrace))
+	}
+}
+
+// A client that goes away is no server fault: no event, however gRPC names it.
+func TestCaptureErrorsIgnoresAbandonedCalls(t *testing.T) {
+	transport := install(t)
+	interceptor := UnaryServerInterceptor(Options{CaptureErrors: true})
+	info := &grpc.UnaryServerInfo{FullMethod: "/feed.v1.Feed/Next"}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := []struct {
+		ctx context.Context
+		err error
+	}{
+		{context.Background(), io.EOF},
+		{context.Background(), fmt.Errorf("read frame: %w", io.ErrUnexpectedEOF)},
+		{context.Background(), context.DeadlineExceeded},
+		{context.Background(), status.Error(codes.Canceled, "client cancelled")},
+		{cancelled, errors.New("write: broken pipe")},
+	}
+	for _, call := range calls {
+		_, _ = interceptor(call.ctx, nil, info, func(context.Context, any) (any, error) { return nil, call.err })
+	}
+	if got := len(transport.all()); got != 0 {
+		t.Errorf("got %d events for abandoned calls", got)
+	}
+
+	// A plain error from a live call is still a server fault gRPC calls Unknown.
+	_, _ = interceptor(context.Background(), nil, info, func(context.Context, any) (any, error) {
+		return nil, errors.New("ledger row is locked")
+	})
+	if events := transport.all(); len(events) != 1 || events[0].Tags["grpc.code"] != "Unknown" {
+		t.Errorf("events = %+v, expected the Unknown error", events)
 	}
 }
 

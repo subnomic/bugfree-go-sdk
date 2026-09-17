@@ -216,7 +216,8 @@ Set `SourceContextLines: -1` to never read source files.
 |---|---|
 | `SampleRate` | Fraction of events to send (default 1). `0` also means 1: to send nothing, leave the DSN empty. |
 | `ProfilingInterval` | How often a CPU and a heap profile are taken (default 0: off). |
-| `TracesSampleRate` | Share of new traces timed (default 0: off). |
+| `TracesSampleRate` | Share of traces timed, decided from the trace id (default 0: off). An incoming `traceparent`'s sampled flag is ignored. |
+| `TrustIncomingSampling` | Follow the incoming sampled flag instead; only when every caller is your own. |
 | `TrackSessions` | Count every request the middlewares handle as a session, for release health (crash-free rate). Reported once a minute. |
 | `DedupeWindow` | How long an identical error is held back (default 1s; negative sends every copy). |
 | `InAppPrefixes` | Which frames count as your code. Defaults to "not stdlib, not a dependency". |
@@ -232,14 +233,16 @@ when it names no time); events captured during the pause are dropped.
 ## Releasing
 
 The SDK is published to `github.com/subnomic/bugfree-go-sdk`, with this
-directory as that repository's root. Raise the versions on `main`, then publish a
-release on the bugfree repository's Releases page with the new tag `sdk-go-v0.2.0`.
+directory as that repository's root, by the bugfree release: one release on the
+bugfree repository's Releases page with the tag `v0.6.0` publishes the server and
+both SDKs at that version.
 
 The release workflow checks that `Version` in `client.go` and the core module
-version `gin/go.mod` requires both match the tag, runs the tests, pushes this
-directory to that repository as one commit and tags it there as `v0.2.0` and
-`gin/v0.2.0`: the gin middleware is a nested module with its own tag.
-`gin/go.mod`'s `replace` line only applies inside this repository.
+version `gin/go.mod` and `grpc/go.mod` require all match the tag, runs the tests,
+pushes this directory to that repository as one commit and tags it there as
+`v0.6.0`, `gin/v0.6.0` and `grpc/v0.6.0`: the gin middleware and the gRPC
+interceptors are nested modules with tags of their own. Their `replace` lines only
+apply inside this repository.
 
 ## License
 

@@ -36,6 +36,9 @@ type Span struct {
 
 	sampled     bool
 	transaction *Span
+	// callerSampled is the decision the incoming traceparent header carried; it
+	// counts only with TrustIncomingSampling.
+	callerSampled *bool
 
 	mu       sync.Mutex
 	finished bool
@@ -60,6 +63,11 @@ func WithOp(op string) SpanOption {
 // ContinueTrace makes the transaction part of the trace a W3C traceparent header
 // names ("00-<trace id>-<parent span id>-<flags>"), so the services of one request
 // show as one trace. An empty or malformed header starts a new trace.
+//
+// Whether the transaction is recorded is still this program's decision, made from
+// the trace id at TracesSampleRate: the sampled flag of the header is ignored
+// unless TrustIncomingSampling is on. Any client can send the header, and trusting
+// its flag would let it have every one of its requests recorded.
 func ContinueTrace(traceparent string) SpanOption {
 	return func(span *Span) {
 		traceID, parentID, sampled, ok := parseTraceparent(traceparent)
@@ -67,7 +75,7 @@ func ContinueTrace(traceparent string) SpanOption {
 			return
 		}
 		span.TraceID, span.ParentSpanID = traceID, parentID
-		span.sampled = sampled
+		span.callerSampled = &sampled
 	}
 }
 
@@ -101,17 +109,16 @@ func (c *Client) StartTransaction(ctx context.Context, name string, options ...S
 	}
 	span := &Span{client: c, Name: name, Start: time.Now(), Status: "ok", SpanID: newSpanID()}
 	span.transaction = span
-	decided := false
 	for _, option := range options {
 		option(span)
 	}
-	if span.TraceID != "" {
-		decided = true
-	} else {
+	if span.TraceID == "" {
 		span.TraceID = newTraceID()
 	}
-	if !decided {
-		span.sampled = c.sampleTrace()
+	if span.callerSampled != nil && c.options.TrustIncomingSampling {
+		span.sampled = *span.callerSampled
+	} else {
+		span.sampled = traceSampled(span.TraceID, c.options.TracesSampleRate)
 	}
 	return context.WithValue(ctx, spanKey{}, span), span
 }
@@ -423,14 +430,22 @@ func (c *Client) postTransaction(body []byte) error {
 	return nil
 }
 
-// sampleTrace decides whether a new trace is recorded.
-func (c *Client) sampleTrace() bool {
-	if c.options.TracesSampleRate >= 1 {
+// traceSampled decides from the trace id whether a trace is recorded at rate.
+// Every service of a trace decides the same way (the server keeps traces by the
+// same rule), so a trace is recorded whole or not at all, without trusting what a
+// caller claims.
+func traceSampled(traceID string, rate float64) bool {
+	if rate >= 1 {
 		return true
 	}
-	c.randomMu.Lock()
-	defer c.randomMu.Unlock()
-	return c.random.Float64() < c.options.TracesSampleRate
+	if rate <= 0 || len(traceID) < 8 {
+		return false
+	}
+	head, err := hex.DecodeString(traceID[:8])
+	if err != nil {
+		return false
+	}
+	return float64(uint32(head[0])<<24|uint32(head[1])<<16|uint32(head[2])<<8|uint32(head[3]))/float64(1<<32) < rate
 }
 
 // ---------- ids and headers ----------

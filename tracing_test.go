@@ -130,16 +130,58 @@ func TestMiddlewareRecordsATransactionWithChildSpans(t *testing.T) {
 	_ = client
 }
 
-func TestUnsampledTraceIsNotSentButStillPropagates(t *testing.T) {
-	_, transport := newTracingClient(t, 1)
+// An outside caller must not decide what is recorded: a sampled flag sent by a
+// client neither forces a trace in nor keeps one out.
+func TestIncomingSampledFlagDoesNotDecide(t *testing.T) {
+	client, transport := newTracingClient(t, 0.01)
 
-	ctx, transaction := StartTransaction(context.Background(), "job", ContinueTrace("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"))
+	// 0xffffffff is far above 1% of the id space: this trace is not kept.
+	_, forced := client.StartTransaction(context.Background(), "job", ContinueTrace("00-ffffffff77b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"))
+	if strings.HasSuffix(forced.Traceparent(), "-01") {
+		t.Error("the caller's sampled flag forced the trace to be recorded")
+	}
+	forced.Finish()
+
+	// 0x00000001 is below 1%: kept, even though the caller said it was not sampled.
+	_, kept := client.StartTransaction(context.Background(), "job", ContinueTrace("00-000000017b34da6a3ce929d0e0e4736f-00f067aa0ba902b7-00"))
+	kept.Finish()
+
+	sent := transport.all()
+	if len(sent) != 1 || sent[0].TraceID != "000000017b34da6a3ce929d0e0e4736f" {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
+func TestTrustIncomingSamplingFollowsTheCaller(t *testing.T) {
+	transport := &traceTransport{}
+	client, err := NewClient(Options{DSN: "http://key@localhost/ingest", Transport: transport, TracesSampleRate: 1, TrustIncomingSampling: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, transaction := client.StartTransaction(context.Background(), "job", ContinueTrace("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"))
 	if !strings.HasSuffix(transaction.Traceparent(), "-00") || SpanFromContext(ctx) != transaction {
 		t.Errorf("traceparent = %q", transaction.Traceparent())
 	}
 	transaction.Finish()
 	if len(transport.all()) != 0 {
-		t.Error("a trace the caller did not sample was sent")
+		t.Error("a trace the trusted caller did not sample was sent")
+	}
+}
+
+func TestTraceSampledIsConsistentAndFollowsTheRate(t *testing.T) {
+	kept := 0
+	for i := 0; i < 20_000; i++ {
+		traceID := newTraceID()
+		if traceSampled(traceID, 0.3) != traceSampled(traceID, 0.3) {
+			t.Fatal("the same trace was decided differently")
+		}
+		if traceSampled(traceID, 0.3) {
+			kept++
+		}
+	}
+	if kept < 5400 || kept > 6600 {
+		t.Errorf("kept %d of 20000 at a 30%% rate", kept)
 	}
 }
 

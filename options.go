@@ -61,10 +61,15 @@ type Options struct {
 	// ProfileDuration is how long each CPU profile runs (10s by default).
 	ProfileDuration time.Duration
 
-	// TracesSampleRate is the share of new traces recorded, between 0 and 1; 0
-	// turns tracing off. A trace continued from an incoming traceparent header
-	// follows the caller's decision instead.
+	// TracesSampleRate is the share of traces recorded, between 0 and 1; 0 turns
+	// tracing off. The decision is made from the trace id, so the services of one
+	// trace agree without trusting each other.
 	TracesSampleRate float64
+
+	// TrustIncomingSampling follows the sampled flag of an incoming traceparent
+	// header instead. Turn it on only when every caller is your own: anyone can
+	// send the header and have all of their requests recorded.
+	TrustIncomingSampling bool
 
 	// TrackSessions counts every request the middlewares handle as a session, for
 	// release health: the crash-free rate of each release. Counts are reported once
