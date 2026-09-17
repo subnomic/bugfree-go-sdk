@@ -160,3 +160,24 @@ func TestSourceReaderCaches(t *testing.T) {
 		t.Error("the second frame got no context")
 	}
 }
+
+// A -trimpath binary names its files by module path, which is no directory on
+// disk; the repository path finds them from the repository root without any roots.
+func TestSourceReaderFindsTrimmedPathFromRepositoryRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "pay"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "pay", "pay.go"), []byte("a\nb\nc\nd\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	reader := newSourceReader(nil, nil)
+	frames := []Frame{{File: "example.com/shop/internal/pay/pay.go", Path: "internal/pay/pay.go", Line: 3}}
+	reader.addContext(frames, 1)
+
+	if len(frames[0].Context) != 3 || frames[0].Context[1].Source != "c" {
+		t.Errorf("context = %+v, expected b, c, d around line 3", frames[0].Context)
+	}
+}

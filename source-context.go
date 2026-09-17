@@ -38,7 +38,7 @@ func (r *sourceReader) addContext(frames []Frame, around int) {
 		return
 	}
 	for i := range frames {
-		lines, ok := r.lines(frames[i].File)
+		lines, ok := r.lines(frames[i].File, frames[i].Path)
 		if !ok {
 			continue
 		}
@@ -55,14 +55,8 @@ func sliceContext(lines []string, line, around int) []ContextLine {
 		return nil
 	}
 
-	start := line - around
-	if start < 1 {
-		start = 1
-	}
-	end := line + around
-	if end > len(lines) {
-		end = len(lines)
-	}
+	start := max(line - around, 1)
+	end := min(line + around, len(lines))
 
 	context := make([]ContextLine, 0, end-start+1)
 	for number := start; number <= end; number++ {
@@ -74,8 +68,9 @@ func sliceContext(lines []string, line, around int) []ContextLine {
 	return context
 }
 
-// lines returns the file's lines (cached).
-func (r *sourceReader) lines(file string) ([]string, bool) {
+// lines returns the file's lines (cached). repoPath is the file's path inside the
+// repository, when known.
+func (r *sourceReader) lines(file, repoPath string) ([]string, bool) {
 	if file == "" {
 		return nil, false
 	}
@@ -87,7 +82,7 @@ func (r *sourceReader) lines(file string) ([]string, bool) {
 		return cached, cached != nil
 	}
 
-	lines := r.read(file)
+	lines := r.read(file, repoPath)
 
 	r.mu.Lock()
 	r.cache[file] = lines
@@ -97,8 +92,8 @@ func (r *sourceReader) lines(file string) ([]string, bool) {
 }
 
 // read tries to read the file from the possible locations.
-func (r *sourceReader) read(file string) []string {
-	for _, candidate := range r.candidates(file) {
+func (r *sourceReader) read(file, repoPath string) []string {
+	for _, candidate := range r.candidates(file, repoPath) {
 		if lines := r.readFrom(candidate); lines != nil {
 			return lines
 		}
@@ -109,9 +104,10 @@ func (r *sourceReader) read(file string) []string {
 // candidates produces the locations to try for a frame path.
 //
 // The order matters: the explicit mapping, then the file itself (an absolute path
-// works directly during development), then the relative path under the roots.
-func (r *sourceReader) candidates(file string) []string {
-	candidates := make([]string, 0, len(r.roots)+2)
+// works directly during development), then the relative path under the roots,
+// and last the path inside the repository.
+func (r *sourceReader) candidates(file, repoPath string) []string {
+	candidates := make([]string, 0, 2*len(r.roots)+3)
 
 	for prefix, root := range r.roots {
 		if prefix != "" && strings.HasPrefix(file, prefix) {
@@ -124,6 +120,17 @@ func (r *sourceReader) candidates(file string) []string {
 	// under the roots.
 	for _, root := range r.roots {
 		candidates = append(candidates, strings.TrimSuffix(root, "/")+"/"+strings.TrimPrefix(file, "/"))
+	}
+
+	// A -trimpath path starts with the module path ("example.com/shop/internal/x.go"),
+	// which is no directory on disk. The repository path is: relative to the working
+	// directory when the program runs from the repository root, as `go run` and most
+	// containers do, or under a root.
+	if repoPath != "" && repoPath != file {
+		candidates = append(candidates, repoPath)
+		for _, root := range r.roots {
+			candidates = append(candidates, strings.TrimSuffix(root, "/")+"/"+repoPath)
+		}
 	}
 	return candidates
 }
