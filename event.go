@@ -30,13 +30,16 @@ const (
 // The Context field is the source code around the failing line; the interface
 // uses that list to show what is written on which line.
 type Frame struct {
-	Function string            `json:"function"`
-	File     string            `json:"file"`
-	Line     int               `json:"line"`
-	InApp    bool              `json:"in_app"`
-	Package  string            `json:"package,omitempty"`
-	Context  []ContextLine     `json:"context,omitempty"`
-	Vars     map[string]string `json:"vars,omitempty"`
+	Function string `json:"function"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	InApp    bool   `json:"in_app"`
+	// Path is the file's path inside the repository ("internal/orders/orders.go"),
+	// set for the application's own frames; the interface links it to your editor.
+	Path    string            `json:"path,omitempty"`
+	Package string            `json:"package,omitempty"`
+	Context []ContextLine     `json:"context,omitempty"`
+	Vars    map[string]string `json:"vars,omitempty"`
 }
 
 // ContextLine is a single line of source code.

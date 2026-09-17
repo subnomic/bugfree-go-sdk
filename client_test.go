@@ -158,8 +158,21 @@ func TestCaptureExceptionHidesSDKFrames(t *testing.T) {
 }
 
 // The source context has to fill in: this test file is on disk, so it is readable.
-func TestCaptureExceptionAttachesSourceContext(t *testing.T) {
+func TestCaptureExceptionReadsNoSourceByDefault(t *testing.T) {
 	client, transport := newTestClient(t, nil)
+	client.CaptureException(errors.New("without context"))
+
+	frame := transport.last().Stacktrace[0]
+	if len(frame.Context) != 0 {
+		t.Error("a production binary has no source to read; nothing is read unless asked")
+	}
+	if frame.File == "" || frame.Line == 0 || frame.Function == "" {
+		t.Errorf("frame = %+v, the location comes from the binary alone", frame)
+	}
+}
+
+func TestCaptureExceptionAttachesSourceContext(t *testing.T) {
+	client, transport := newTestClient(t, func(options *Options) { options.SourceContextLines = 5 })
 
 	client.CaptureException(errors.New("with context"))
 

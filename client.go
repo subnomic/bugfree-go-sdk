@@ -16,7 +16,7 @@ import (
 )
 
 // Version is the SDK version; used in the User-Agent and the event tags.
-const Version = "0.6.0"
+const Version = "0.7.0"
 
 // Client collects the events and hands them to the transport.
 //
@@ -86,6 +86,12 @@ func NewClient(options Options) (*Client, error) {
 		source:  newSourceReader(options.SourceRoots, options.SourceFS),
 		random:  rand.New(rand.NewSource(time.Now().UnixNano())),
 		dedupe:  newDedupe(options.DedupeWindow),
+	}
+
+	// The build names itself when the options do not: the commit the binary was
+	// built from is what a person needs to find the failing line in their checkout.
+	if client.options.Release == "" {
+		client.options.Release = readBuildInfo().release()
 	}
 
 	if options.ServerName == "" {
@@ -346,7 +352,7 @@ func (c *Client) newEvent(scope *Scope, level Level, eventType, message string, 
 		OS:          runtime.GOOS + "/" + runtime.GOARCH,
 		Stacktrace:  frames,
 		Breadcrumbs: scope.breadcrumbs(),
-		Tags:        scope.tags(map[string]any{"sdk": "bugfree-go/" + Version}),
+		Tags:        scope.tags(buildTags()),
 		User:        scope.user(),
 		Memory:      memoryStats(),
 		OccurredAt:  timestamp(time.Now()),
@@ -377,6 +383,20 @@ func (c *Client) finish(event *Event, modifiers ...EventModifier) string {
 	}
 	c.transport.Send(event)
 	return event.EventID
+}
+
+// buildTags are the tags every event starts with: the SDK, and the commit the
+// binary was built from when the build recorded one.
+func buildTags() map[string]any {
+	tags := map[string]any{"sdk": "bugfree-go/" + Version}
+	build := readBuildInfo()
+	if build.revision != "" {
+		tags["commit"] = build.shortRevision()
+		if build.modified {
+			tags["commit.modified"] = "true"
+		}
+	}
+	return tags
 }
 
 // newEventID produces a random (version 4) UUID.

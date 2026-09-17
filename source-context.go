@@ -34,7 +34,7 @@ const maxSourceLines = 20_000
 
 // addContext attaches the source around the failing line to every frame.
 func (r *sourceReader) addContext(frames []Frame, around int) {
-	if around < 0 {
+	if around <= 0 {
 		return
 	}
 	for i := range frames {

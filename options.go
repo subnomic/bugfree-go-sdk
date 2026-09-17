@@ -31,9 +31,10 @@ type Options struct {
 	// held back. 0 uses the default (1s); a negative value sends every copy.
 	DedupeWindow time.Duration
 
-	// SourceContextLines is how many lines to show above and below the failing
-	// line in each frame. 0 uses the default (5); a negative value reads no source
-	// at all.
+	// SourceContextLines reads that many lines above and below the failing line
+	// from the source files, when the machine running the program has them (a
+	// development machine). 0, the default, reads nothing: a production binary runs
+	// without its source, and the stack still names the function, file and line.
 	SourceContextLines int
 
 	// SourceRoots maps the build path onto a local directory.
@@ -152,9 +153,6 @@ func parseDSN(raw string) (*dsn, error) {
 func (o *Options) normalize() {
 	if o.SampleRate <= 0 || o.SampleRate > 1 {
 		o.SampleRate = 1
-	}
-	if o.SourceContextLines == 0 {
-		o.SourceContextLines = 5
 	}
 	if o.MaxBreadcrumbs <= 0 {
 		o.MaxBreadcrumbs = 30

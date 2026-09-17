@@ -126,17 +126,25 @@ func packageOf(function string) string {
 	return function[:slash+1+dot]
 }
 
-// markInApp decides for each frame whether it belongs to the application.
+// markInApp decides for each frame whether it belongs to the application, and
+// gives the application's frames their path inside the repository.
 func (c *Client) markInApp(frames []Frame) {
+	build := readBuildInfo()
 	for i := range frames {
 		frames[i].InApp = c.isInApp(frames[i])
+		if frames[i].InApp {
+			frames[i].Path = build.repositoryPath(frames[i])
+		}
 	}
 }
 
 // isInApp decides whether a frame is application code.
 //
-// The explicitly given prefixes are tried first; without them, everything outside
-// the standard library and the module cache (dependencies) is application code.
+// The explicitly given prefixes are tried first. Without them the binary's own
+// build information decides: a function of the main module is application code,
+// anything else (the standard library, dependencies, this SDK) is not. That holds
+// for a -trimpath build too, whose file paths say nothing about where code lives.
+// Only a binary without build information falls back to reading the file path.
 func (c *Client) isInApp(frame Frame) bool {
 	if len(c.options.InAppPrefixes) > 0 {
 		for _, prefix := range c.options.InAppPrefixes {
@@ -150,9 +158,23 @@ func (c *Client) isInApp(frame Frame) bool {
 		return false
 	}
 
+	if build := readBuildInfo(); build.module != "" {
+		return build.ownsFunction(frame.Function)
+	}
+	return inAppByPath(frame)
+}
+
+// inAppByPath guesses from the file path, for a binary without build information.
+func inAppByPath(frame Frame) bool {
 	file := frame.File
 	switch {
 	case file == "":
+		return false
+	// -trimpath paths: "example.com/router@v1.2.0/context.go" for a
+	// dependency, "net/http/server.go" for the standard library, whose first
+	// element has no dot.
+	case strings.Contains(file, "@v"),
+		!strings.HasPrefix(file, "/") && !strings.Contains(strings.SplitN(file, "/", 2)[0], "."):
 		return false
 	case strings.Contains(file, "/pkg/mod/"), // downloaded dependencies
 		strings.Contains(file, "/go/src/runtime/"),
