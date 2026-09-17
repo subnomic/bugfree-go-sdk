@@ -199,9 +199,8 @@ sql.Register("pgx+bugfree", bugfree.WrapDriver(stdlib.GetDefaultDriver()))
 
 ## Where the error happened
 
-No source code is sent. A Go binary knows, without its source, the function,
-the file inside the module and the line of every frame, and that is what the SDK
-reports. Your own frames are told apart from the standard library and your
+A Go binary knows, without its source, the function, the file inside the module
+and the line of every frame, and the SDK always reports that. Your own frames are told apart from the standard library and your
 dependencies by the module the binary was built from, `-trimpath` builds
 included, and carry their path inside the repository.
 
@@ -218,15 +217,41 @@ if response.StatusCode == http.StatusServiceUnavailable {
 }
 ```
 
-On a development machine that has the sources, `SourceContextLines: 5` reads the
-lines around the failing line (off by default); `SourceRoots` and `SourceFS` say
-where the files are.
+### The code around the failing line
+
+A binary carries no source text, so the lines are read from the source files.
+`SourceContextLines: 5` sends the failing line and five lines above and below it
+for every frame of your code. Where the program runs without its sources, as in
+most containers, embed them and pass them as `SourceFS`:
+
+```go
+// sources.go, at the root of the module
+package main
+
+import "embed"
+
+//go:embed *.go internal
+var sources embed.FS
+```
+
+```go
+bugfree.Init(bugfree.Options{
+	DSN:                os.Getenv("BUGFREE_DSN"),
+	SourceContextLines: 5,
+	SourceFS:           sources,
+})
+```
+
+`go:embed` reaches only its own directory and the ones below, so the file belongs
+at the root of the module. Without `SourceFS` the files are read from disk:
+relative to the working directory, or under `SourceRoots`. Normal and `-trimpath`
+builds both work.
 
 ## Options worth knowing
 
 | Option | Meaning |
 |---|---|
-| `SourceContextLines` | Lines read around the failing line from local source files (default 0: none). |
+| `SourceContextLines` | Lines sent above and below the failing line, read from the source files or `SourceFS` (default 0: none). |
 | `SampleRate` | Fraction of events to send (default 1). `0` also means 1: to send nothing, leave the DSN empty. |
 | `ProfilingInterval` | How often a CPU and a heap profile are taken (default 0: off). |
 | `TracesSampleRate` | Share of traces timed, decided from the trace id (default 0: off). An incoming `traceparent`'s sampled flag is ignored. |
@@ -247,13 +272,13 @@ when it names no time); events captured during the pause are dropped.
 
 The SDK is published to `github.com/subnomic/bugfree-go-sdk`, with this
 directory as that repository's root, by the bugfree release: one release on the
-bugfree repository's Releases page with the tag `v0.8.0` publishes the server and
+bugfree repository's Releases page with the tag `v0.9.0` publishes the server and
 both SDKs at that version.
 
 The release workflow checks that `Version` in `client.go` and the core module
 version `gin/go.mod` and `grpc/go.mod` require all match the tag, runs the tests,
 pushes this directory to that repository as one commit and tags it there as
-`v0.8.0`, `gin/v0.8.0` and `grpc/v0.8.0`: the gin middleware and the gRPC
+`v0.9.0`, `gin/v0.9.0` and `grpc/v0.9.0`: the gin middleware and the gRPC
 interceptors are nested modules with tags of their own. Their `replace` lines only
 apply inside this repository.
 
