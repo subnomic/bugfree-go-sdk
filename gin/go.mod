@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/subnomic/bugfree-go-sdk v0.9.0
+	github.com/subnomic/bugfree-go-sdk v0.9.2
 )
 
 require (
