@@ -16,7 +16,7 @@ import (
 )
 
 // Version is the SDK version; used in the User-Agent and the event tags.
-const Version = "0.9.4"
+const Version = "0.9.5"
 
 // Client collects the events and hands them to the transport.
 //

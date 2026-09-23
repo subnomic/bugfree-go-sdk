@@ -281,13 +281,13 @@ when it names no time); events captured during the pause are dropped.
 
 The SDK is published to `github.com/subnomic/bugfree-go-sdk`, with this
 directory as that repository's root, by the bugfree release: one release on the
-bugfree repository's Releases page with the tag `v0.9.4` publishes the server and
+bugfree repository's Releases page with the tag `v0.9.5` publishes the server and
 both SDKs at that version.
 
 The release workflow checks that `Version` in `client.go` and the core module
 version `gin/go.mod` and `grpc/go.mod` require all match the tag, runs the tests,
 pushes this directory to that repository as one commit and tags it there as
-`v0.9.4`, `gin/v0.9.4` and `grpc/v0.9.4`: the gin middleware and the gRPC
+`v0.9.5`, `gin/v0.9.5` and `grpc/v0.9.5`: the gin middleware and the gRPC
 interceptors are nested modules with tags of their own. Their `replace` lines only
 apply inside this repository.
 
