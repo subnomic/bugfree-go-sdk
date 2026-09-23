@@ -65,11 +65,21 @@ type Options struct {
 	// TracesSampleRate is the share of traces recorded, between 0 and 1; 0 turns
 	// tracing off. The decision is made from the trace id, so the services of one
 	// trace agree without trusting each other.
+	//
+	// A request that continues an incoming traceparent keeps the caller's trace
+	// id, and with it the decision: an id that starts with 00000001 is recorded at
+	// any rate, by this program and by the server alike, so any client can have
+	// every one of its requests recorded. Where requests come from outside, keep
+	// the rate at a cost you accept, or remove the traceparent header before the
+	// middleware (at the proxy, for instance) so those requests start traces of
+	// their own.
 	TracesSampleRate float64
 
 	// TrustIncomingSampling follows the sampled flag of an incoming traceparent
 	// header instead. Turn it on only when every caller is your own: anyone can
-	// send the header and have all of their requests recorded.
+	// send the header and have all of their requests recorded. It covers the flag
+	// only: with it off, the caller's trace id still decides, as TracesSampleRate
+	// describes.
 	TrustIncomingSampling bool
 
 	// TrackSessions counts every request the middlewares handle as a session, for

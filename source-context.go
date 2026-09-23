@@ -55,8 +55,8 @@ func sliceContext(lines []string, line, around int) []ContextLine {
 		return nil
 	}
 
-	start := max(line - around, 1)
-	end := min(line + around, len(lines))
+	start := max(line-around, 1)
+	end := min(line+around, len(lines))
 
 	context := make([]ContextLine, 0, end-start+1)
 	for number := start; number <= end; number++ {
