@@ -3,7 +3,7 @@ module github.com/subnomic/bugfree-go-sdk/grpc
 go 1.26.0
 
 require (
-	github.com/subnomic/bugfree-go-sdk v0.9.5
+	github.com/subnomic/bugfree-go-sdk v0.9.6
 	google.golang.org/grpc v1.83.2
 )
 
